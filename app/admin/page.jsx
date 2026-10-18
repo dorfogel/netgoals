@@ -13,6 +13,7 @@ export default function AdminPanel() {
   const [matches, setMatches] = useState([]);
   const [actualScores, setActualScores] = useState({});
   const [loading, setLoading] = useState(false);
+  const [fetchingApi, setFetchingApi] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
 
   // שדות להוספת משחק חדש
@@ -64,6 +65,28 @@ export default function AdminPanel() {
       console.error('Error fetching matches:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleFetchAutoMatches = async () => {
+    setFetchingApi(true);
+    setStatusMessage('');
+
+    try {
+      const res = await fetch('/api/fetch-matches');
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || 'שגיאה במשיכת הנתונים');
+      }
+
+      setStatusMessage(`✅ ${data.message || 'משחקי המחזור יובאו בהצלחה!'}`);
+      await fetchMatches();
+    } catch (err) {
+      console.error('API Auto Fetch Error:', err);
+      setStatusMessage(`❌ שגיאה בטעינת משחקים אוטומטית: ${err.message}`);
+    } finally {
+      setFetchingApi(false);
     }
   };
 
@@ -278,10 +301,29 @@ export default function AdminPanel() {
         </div>
       )}
 
-      {/* Form: Add New Match */}
+      {/* Auto Fetch Button Box */}
+      <section className="bg-slate-800 rounded-2xl p-6 border border-amber-400/30 shadow-xl mb-6">
+        <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+          <div>
+            <h3 className="text-lg font-bold text-amber-400 mb-1 flex items-center gap-2">
+              ⚡ ייבוא אוטומטי מ-API
+            </h3>
+            <p className="text-xs text-slate-400">משוך את המשחקים הקרובים מליגת העל ישירות למערכת</p>
+          </div>
+          <button
+            onClick={handleFetchAutoMatches}
+            disabled={fetchingApi}
+            className="bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold px-5 py-3 rounded-xl transition shadow-lg whitespace-nowrap text-sm disabled:opacity-50"
+          >
+            {fetchingApi ? 'מושך משחקים...' : '🔄 משוך משחקים אוטומטית'}
+          </button>
+        </div>
+      </section>
+
+      {/* Form: Add New Match Manually */}
       <section className="bg-slate-800 rounded-2xl p-6 border border-slate-700 shadow-xl mb-8">
-        <h2 className="text-xl font-bold text-amber-400 mb-4 flex items-center gap-2">
-          ➕ הוספת משחק חדש למחזור
+        <h2 className="text-xl font-bold text-slate-200 mb-4 flex items-center gap-2">
+          ➕ הוספת משחק ידנית
         </h2>
 
         <form onSubmit={handleAddMatch} className="space-y-4">
@@ -353,7 +395,7 @@ export default function AdminPanel() {
 
         {matches.length === 0 ? (
           <div className="bg-slate-800 rounded-2xl p-8 border border-slate-700 text-center text-slate-400">
-            אין משחקים פעילים במחזור. השתמש בטופס למעלה כדי להוסיף משחקים!
+            אין משחקים פעילים במחזור. השתמש בייבוא האוטומטי או בטופס למעלה כדי להוסיף משחקים!
           </div>
         ) : (
           matches.map((match) => {
