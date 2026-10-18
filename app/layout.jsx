@@ -34,6 +34,9 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="he" dir="rtl" className="bg-slate-950 text-slate-100 min-h-screen">
+      <head>
+        <script src="https://cdn.tailwindcss.com"></script>
+      </head>
       <body className="font-sans antialiased bg-slate-950 text-slate-100 min-h-screen">
         {children}
       </body>
