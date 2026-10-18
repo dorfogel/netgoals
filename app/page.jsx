@@ -32,19 +32,37 @@ export default function Home() {
     setLoading(true);
 
     try {
-      const tempUserId = crypto.randomUUID();
+      const cleanName = userName.trim();
+      let userId = null;
 
-      await supabase.from('profiles').insert([
-        {
-          id: tempUserId,
-          full_name: userName,
-        },
-      ]);
+      // 1. בדיקה אם קיים משתמש עם אותו השם
+      const { data: existingProfiles } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('full_name', cleanName)
+        .limit(1);
 
+      if (existingProfiles && existingProfiles.length > 0) {
+        userId = existingProfiles[0].id;
+      } else {
+        // 2. יצירת משתמש חדש אם לא נמצא משתמש קיים
+        userId = crypto.randomUUID();
+        await supabase.from('profiles').insert([
+          {
+            id: userId,
+            full_name: cleanName,
+          },
+        ]);
+      }
+
+      // 3. מחיקת ניחושים קודמים של המשתמש למשחקים האלה (מונע כפילויות)
+      await supabase.from('predictions').delete().eq('user_id', userId);
+
+      // 4. שמירת הניחושים החדשים
       const predictionInserts = INITIAL_MATCHES.map((match) => {
         const pred = predictions[match.id] || { home: '0', away: '0' };
         return {
-          user_id: tempUserId,
+          user_id: userId,
           match_id: match.id,
           home_score_pred: parseInt(pred.home || '0', 10),
           away_score_pred: parseInt(pred.away || '0', 10),
