@@ -69,9 +69,30 @@ export default function Home() {
         ]);
       }
 
-      await supabase.from('predictions').delete().eq('user_id', userId);
+      // סינון משחקים פתוחים בלבד (בדיקת בטיחות בצד הלקוח והשרת)
+      const now = new Date();
+      const openMatches = matches.filter((m) => {
+        if (!m.match_time) return true;
+        return new Date(m.match_time) > now;
+      });
 
-      const predictionInserts = matches.map((match) => {
+      if (openMatches.length === 0) {
+        alert('כל המשחקים במחזור כבר ננעלו לניחושים.');
+        setLoading(false);
+        return;
+      }
+
+      // מחיקת ניחושים ישנים אך ורק למשחקים שעדיין פתוחים
+      const openMatchIds = openMatches.map((m) => m.id);
+      for (const mId of openMatchIds) {
+        await supabase
+          .from('predictions')
+          .delete()
+          .eq('user_id', userId)
+          .eq('match_id', mId);
+      }
+
+      const predictionInserts = openMatches.map((match) => {
         const pred = predictions[match.id] || { home: '0', away: '0' };
         return {
           user_id: userId,
@@ -104,6 +125,9 @@ export default function Home() {
     return `https://wa.me/?text=${encodeURIComponent(text)}`;
   };
 
+  const now = new Date();
+  const allLocked = matches.length > 0 && matches.every((m) => m.match_time && new Date(m.match_time) <= now);
+
   return (
     <main className="max-w-2xl mx-auto px-4 py-8">
       {/* Header */}
@@ -133,7 +157,7 @@ export default function Home() {
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700/50 mb-6 text-center">
             <h2 className="text-xl font-bold text-slate-200">מחזור המשחקים המרכזי</h2>
-            <p className="text-sm text-slate-400">נחשו את התוצאות המדויקות למשחקי השבוע</p>
+            <p className="text-sm text-slate-400">נחשו את התוצאות המדויקות לפני שריקת הפתיחה</p>
           </div>
 
           <div className="bg-slate-800 rounded-2xl p-5 border border-slate-700 shadow-lg">
@@ -150,48 +174,67 @@ export default function Home() {
             />
           </div>
 
-          {matches.map((match) => (
-            <div key={match.id} className="bg-slate-800 rounded-2xl p-5 border border-slate-700 shadow-lg">
-              <div className="flex justify-between items-center text-xs text-amber-400 mb-3">
-                <span className="font-semibold">{match.league_name}</span>
+          {matches.map((match) => {
+            const matchDate = match.match_time ? new Date(match.match_time) : null;
+            const isLocked = matchDate ? now >= matchDate : false;
+
+            return (
+              <div
+                key={match.id}
+                className={`bg-slate-800 rounded-2xl p-5 border transition ${
+                  isLocked ? 'border-rose-500/30 opacity-75' : 'border-slate-700 shadow-lg'
+                }`}
+              >
+                <div className="flex justify-between items-center text-xs text-amber-400 mb-3">
+                  <span className="font-semibold">{match.league_name}</span>
+                  {matchDate && (
+                    <span className={`px-2 py-0.5 rounded font-mono font-bold ${
+                      isLocked ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' : 'text-slate-400'
+                    }`}>
+                      {isLocked ? '🔒 ננעל לניחושים' : '⏰ שריקת פתיחה: ' + matchDate.toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' })}
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-7 items-center gap-2 text-center">
+                  <span className="col-span-2 font-bold text-lg text-slate-100">{match.home_team}</span>
+                  
+                  <input
+                    type="number"
+                    min="0"
+                    max="9"
+                    placeholder="0"
+                    disabled={isLocked}
+                    required={!isLocked}
+                    className="col-span-1 bg-slate-900 border border-slate-600 text-white text-center text-xl rounded-lg py-2 focus:border-amber-400 outline-none disabled:opacity-40 disabled:cursor-not-allowed"
+                    onChange={(e) => handleScoreChange(match.id, 'home', e.target.value)}
+                  />
+
+                  <span className="col-span-1 text-slate-500 font-bold">:</span>
+
+                  <input
+                    type="number"
+                    min="0"
+                    max="9"
+                    placeholder="0"
+                    disabled={isLocked}
+                    required={!isLocked}
+                    className="col-span-1 bg-slate-900 border border-slate-600 text-white text-center text-xl rounded-lg py-2 focus:border-amber-400 outline-none disabled:opacity-40 disabled:cursor-not-allowed"
+                    onChange={(e) => handleScoreChange(match.id, 'away', e.target.value)}
+                  />
+
+                  <span className="col-span-2 font-bold text-lg text-slate-100">{match.away_team}</span>
+                </div>
               </div>
-
-              <div className="grid grid-cols-7 items-center gap-2 text-center">
-                <span className="col-span-2 font-bold text-lg text-slate-100">{match.home_team}</span>
-                
-                <input
-                  type="number"
-                  min="0"
-                  max="9"
-                  placeholder="0"
-                  required
-                  className="col-span-1 bg-slate-900 border border-slate-600 text-white text-center text-xl rounded-lg py-2 focus:border-amber-400 outline-none"
-                  onChange={(e) => handleScoreChange(match.id, 'home', e.target.value)}
-                />
-
-                <span className="col-span-1 text-slate-500 font-bold">:</span>
-
-                <input
-                  type="number"
-                  min="0"
-                  max="9"
-                  placeholder="0"
-                  required
-                  className="col-span-1 bg-slate-900 border border-slate-600 text-white text-center text-xl rounded-lg py-2 focus:border-amber-400 outline-none"
-                  onChange={(e) => handleScoreChange(match.id, 'away', e.target.value)}
-                />
-
-                <span className="col-span-2 font-bold text-lg text-slate-100">{match.away_team}</span>
-              </div>
-            </div>
-          ))}
+            );
+          })}
 
           <button
             type="submit"
-            disabled={loading}
-            className="w-full bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-xl py-4 rounded-xl transition shadow-lg shadow-amber-400/10 mt-8 disabled:opacity-50"
+            disabled={loading || allLocked}
+            className="w-full bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-xl py-4 rounded-xl transition shadow-lg shadow-amber-400/10 mt-8 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {loading ? 'שומר ניחושים...' : 'שליחת הניחושים שלי 🚀'}
+            {loading ? 'שומר ניחושים...' : allLocked ? '🔒 כל המשחקים ננעלו' : 'שליחת הניחושים שלי 🚀'}
           </button>
         </form>
       ) : (
