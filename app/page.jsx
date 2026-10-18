@@ -138,21 +138,27 @@ export default function Home() {
         <div className="flex justify-center flex-wrap gap-2 mt-6">
           <Link
             href="/leaderboard"
-            className="inline-flex items-center gap-1.5 bg-amber-400/10 hover:bg-amber-400/20 text-amber-400 border border-amber-400/30 px-3.5 py-2 rounded-xl font-bold transition text-xs"
+            className="inline-flex items-center gap-1.5 bg-amber-400/10 hover:bg-amber-400/20 text-amber-400 border border-amber-400/30 px-3 py-2 rounded-xl font-bold transition text-xs"
           >
             🏆 טבלת המובילים
           </Link>
           <Link
             href="/stats"
-            className="inline-flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3.5 py-2 rounded-xl font-bold transition text-xs"
+            className="inline-flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-2 rounded-xl font-bold transition text-xs"
           >
-            📊 מגמות קהילה
+            📊 מגמות
           </Link>
           <Link
             href="/profile"
-            className="inline-flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3.5 py-2 rounded-xl font-bold transition text-xs"
+            className="inline-flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-2 rounded-xl font-bold transition text-xs"
           >
-            👤 הפרופיל שלי
+            👤 פרופיל
+          </Link>
+          <Link
+            href="/rules"
+            className="inline-flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-2 rounded-xl font-bold transition text-xs"
+          >
+            📜 חוקה
           </Link>
         </div>
       </header>
