@@ -13,7 +13,7 @@ const MATCHES_LIST = [
 
 export default function AdminPanel() {
   const [actualScores, setActualScores] = useState({});
-  const [loadingMatchId, setLoadingMatchId] = useState(null);
+  const [loading, setLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
 
   useEffect(() => {
@@ -22,10 +22,10 @@ export default function AdminPanel() {
 
   const loadExistingScores = async () => {
     const { data: matches } = await supabase.from('matches').select('*');
-    if (matches) {
+    if (matches && matches.length > 0) {
       const scores = {};
       matches.forEach((m) => {
-        if (m.home_score !== null && m.away_score !== null) {
+        if (m.home_score !== null && m.home_score !== undefined && m.away_score !== null && m.away_score !== undefined) {
           scores[m.id] = { home: m.home_score, away: m.away_score };
         }
       });
@@ -43,73 +43,85 @@ export default function AdminPanel() {
     }));
   };
 
-  // מנגנון החישוב והעדכון
-  const handleSaveAndCalculate = async (matchId) => {
-    const scoreData = actualScores[matchId];
-    if (!scoreData || scoreData.home === undefined || scoreData.away === undefined) {
-      alert('נא להזין תוצאה לשתי הקבוצות');
-      return;
-    }
-
-    const homeActual = parseInt(scoreData.home, 10);
-    const awayActual = parseInt(scoreData.away, 10);
-
-    setLoadingMatchId(matchId);
+  // מנגנון חישוב ועדכון גורף לכל המשחקים שהוזנו
+  const handleSaveAllAndCalculate = async () => {
+    setLoading(true);
     setStatusMessage('');
 
     try {
-      // 1. עדכון תוצאת המשחק בטבלת matches
-      await supabase
-        .from('matches')
-        .update({
-          home_score: homeActual,
-          away_score: awayActual,
-          status: 'finished',
-        })
-        .eq('id', matchId);
-
-      // 2. שליפת כל הניחושים למשחק הזה
+      // 1. שליפת כל הניחושים הקיימים במערכת
       const { data: predictions, error: predErr } = await supabase
         .from('predictions')
-        .select('*')
-        .eq('match_id', matchId);
+        .select('*');
 
       if (predErr) throw predErr;
 
-      // 3. חישוב נקודות לכל ניחוש
-      for (const pred of predictions || []) {
-        const homePred = pred.home_score_pred;
-        const awayPred = pred.away_score_pred;
+      let updatedMatchesCount = 0;
 
-        let points = 0;
-
-        // בול בתוצאה
-        if (homePred === homeActual && awayPred === awayActual) {
-          points = 3;
-        } 
-        // בינגו בכיוון (ניצחון בית / ניצחון חוץ / תיקו)
-        else {
-          const actualOutcome = Math.sign(homeActual - awayActual);
-          const predOutcome = Math.sign(homePred - awayPred);
-
-          if (actualOutcome === predOutcome) {
-            points = 1;
-          }
+      for (const match of MATCHES_LIST) {
+        const scoreData = actualScores[match.id];
+        if (!scoreData || scoreData.home === '' || scoreData.away === '' || scoreData.home === undefined || scoreData.away === undefined) {
+          continue; // דילוג על משחקים שלא הוזנה לצידם תוצאה
         }
 
-        // 4. עדכון הנקודות ב-predictions
+        const homeActual = parseInt(scoreData.home, 10);
+        const awayActual = parseInt(scoreData.away, 10);
+
+        // א) עדכון/הכנסת תוצאת המשחק בטבלת matches
         await supabase
-          .from('predictions')
-          .update({ points_earned: points })
-          .eq('id', pred.id);
+          .from('matches')
+          .upsert([
+            {
+              id: match.id,
+              home_team: match.homeTeam,
+              away_team: match.awayTeam,
+              league_name: match.league,
+              home_score: homeActual,
+              away_score: awayActual,
+              match_time: new Date().toISOString(),
+              status: 'finished',
+            },
+          ]);
+
+        // ב) חישוב נקודות לכל הניחושים של המשחק הספציפי הזה
+        const matchPredictions = (predictions || []).filter((p) => p.match_id === match.id);
+
+        for (const pred of matchPredictions) {
+          const homePred = pred.home_score_pred;
+          const awayPred = pred.away_score_pred;
+
+          let points = 0;
+
+          // בול בתוצאה המדויקת (3 נקודות)
+          if (homePred === homeActual && awayPred === awayActual) {
+            points = 3;
+          } 
+          // בינגו בכיוון (1 נקודה)
+          else {
+            const actualOutcome = Math.sign(homeActual - awayActual);
+            const predOutcome = Math.sign(homePred - awayPred);
+
+            if (actualOutcome === predOutcome) {
+              points = 1;
+            }
+          }
+
+          // עדכון הנקודות בניחוש
+          await supabase
+            .from('predictions')
+            .update({ points_earned: points })
+            .eq('id', pred.id);
+        }
+
+        updatedMatchesCount++;
       }
 
-      setStatusMessage(`✅ התוצאה עודכנה והנקודות חושבו בהצלחה!`);
+      setStatusMessage(`✅ עדכון הושלם בהצלחה עבור ${updatedMatchesCount} משחקים! הניקוד בטבלה עודכן.`);
     } catch (err) {
       console.error('Error calculating scores:', err);
       setStatusMessage('❌ אירעה שגיאה בעדכון התוצאות.');
     } finally {
-      setLoadingMatchId(null);
+      setLoading(false);
     }
   };
 
@@ -144,13 +156,12 @@ export default function AdminPanel() {
       <div className="space-y-6">
         {MATCHES_LIST.map((match) => {
           const score = actualScores[match.id] || { home: '', away: '' };
-          const isLoading = loadingMatchId === match.id;
 
           return (
             <div key={match.id} className="bg-slate-800 rounded-2xl p-5 border border-slate-700 shadow-lg">
               <div className="text-xs font-semibold text-amber-400 mb-3">{match.league}</div>
 
-              <div className="grid grid-cols-7 items-center gap-2 text-center mb-4">
+              <div className="grid grid-cols-7 items-center gap-2 text-center">
                 <span className="col-span-2 font-bold text-lg text-slate-100">{match.homeTeam}</span>
 
                 <input
@@ -177,17 +188,17 @@ export default function AdminPanel() {
 
                 <span className="col-span-2 font-bold text-lg text-slate-100">{match.awayTeam}</span>
               </div>
-
-              <button
-                onClick={() => handleSaveAndCalculate(match.id)}
-                disabled={isLoading}
-                className="w-full bg-slate-700 hover:bg-slate-600 text-amber-400 font-bold py-2.5 rounded-xl transition text-sm disabled:opacity-50"
-              >
-                {isLoading ? 'מחשב נקודות...' : 'שמור תוצאה וחשב נקודות ⚡'}
-              </button>
             </div>
           );
         })}
+
+        <button
+          onClick={handleSaveAllAndCalculate}
+          disabled={loading}
+          className="w-full bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-xl py-4 rounded-xl transition shadow-lg mt-8 disabled:opacity-50"
+        >
+          {loading ? 'מחשב נקודות לכל המשחקים...' : 'שמור וחשב את כל התוצאות ⚡'}
+        </button>
       </div>
     </main>
   );
