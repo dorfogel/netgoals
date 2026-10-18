@@ -11,14 +11,38 @@ const MATCHES_LIST = [
   { id: '55555555-5555-5555-5555-555555555555', homeTeam: 'באיירן מינכן', awayTeam: 'בורוסיה דורטמונד', league: 'בונדסליגה' },
 ];
 
+// הסיסמה שמוגדרת כברירת מחדל (אפשר לשנות/להגדיר גם ב-Vercel)
+const ADMIN_PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || 'netgoals2026';
+
 export default function AdminPanel() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [loginError, setLoginError] = useState('');
+
   const [actualScores, setActualScores] = useState({});
   const [loading, setLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
 
   useEffect(() => {
-    loadExistingScores();
+    // בדיקה אם האדמין כבר מחובר ב-session
+    const savedAuth = sessionStorage.getItem('netgoals_admin_auth');
+    if (savedAuth === 'true') {
+      setIsAuthenticated(true);
+      loadExistingScores();
+    }
   }, []);
+
+  const handleLogin = (e) => {
+    e.preventDefault();
+    if (passwordInput === ADMIN_PASSWORD) {
+      sessionStorage.setItem('netgoals_admin_auth', 'true');
+      setIsAuthenticated(true);
+      setLoginError('');
+      loadExistingScores();
+    } else {
+      setLoginError('סיסמה שגויה. נסה שוב.');
+    }
+  };
 
   const loadExistingScores = async () => {
     const { data: matches } = await supabase.from('matches').select('*');
@@ -43,13 +67,11 @@ export default function AdminPanel() {
     }));
   };
 
-  // מנגנון חישוב ועדכון גורף לכל המשחקים שהוזנו
   const handleSaveAllAndCalculate = async () => {
     setLoading(true);
     setStatusMessage('');
 
     try {
-      // 1. שליפת כל הניחושים הקיימים במערכת
       const { data: predictions, error: predErr } = await supabase
         .from('predictions')
         .select('*');
@@ -61,13 +83,12 @@ export default function AdminPanel() {
       for (const match of MATCHES_LIST) {
         const scoreData = actualScores[match.id];
         if (!scoreData || scoreData.home === '' || scoreData.away === '' || scoreData.home === undefined || scoreData.away === undefined) {
-          continue; // דילוג על משחקים שלא הוזנה לצידם תוצאה
+          continue;
         }
 
         const homeActual = parseInt(scoreData.home, 10);
         const awayActual = parseInt(scoreData.away, 10);
 
-        // א) עדכון/הכנסת תוצאת המשחק בטבלת matches
         await supabase
           .from('matches')
           .upsert([
@@ -83,7 +104,6 @@ export default function AdminPanel() {
             },
           ]);
 
-        // ב) חישוב נקודות לכל הניחושים של המשחק הספציפי הזה
         const matchPredictions = (predictions || []).filter((p) => p.match_id === match.id);
 
         for (const pred of matchPredictions) {
@@ -92,12 +112,9 @@ export default function AdminPanel() {
 
           let points = 0;
 
-          // בול בתוצאה המדויקת (3 נקודות)
           if (homePred === homeActual && awayPred === awayActual) {
             points = 3;
-          } 
-          // בינגו בכיוון (1 נקודה)
-          else {
+          } else {
             const actualOutcome = Math.sign(homeActual - awayActual);
             const predOutcome = Math.sign(homePred - awayPred);
 
@@ -106,7 +123,6 @@ export default function AdminPanel() {
             }
           }
 
-          // עדכון הנקודות בניחוש
           await supabase
             .from('predictions')
             .update({ points_earned: points })
@@ -125,9 +141,64 @@ export default function AdminPanel() {
     }
   };
 
+  // מסך התחברות במידה והאדמין אינו מחובר
+  if (!isAuthenticated) {
+    return (
+      <main className="max-w-md mx-auto px-4 py-16">
+        <div className="bg-slate-800 rounded-2xl p-8 border border-slate-700 shadow-xl text-center">
+          <div className="text-4xl mb-3">🔒</div>
+          <h1 className="text-2xl font-bold text-amber-400 mb-2">כניסת מנהל למערכת</h1>
+          <p className="text-sm text-slate-400 mb-6">הזן סיסמת אדמין כדי לגשת לפאנל הניהול</p>
+
+          <form onSubmit={handleLogin} className="space-y-4">
+            <input
+              type="password"
+              required
+              placeholder="הכנס סיסמת אדמין"
+              value={passwordInput}
+              onChange={(e) => setPasswordInput(e.target.value)}
+              className="w-full bg-slate-900 border border-slate-600 text-white text-center rounded-xl px-4 py-3 outline-none focus:border-amber-400"
+            />
+
+            {loginError && <p className="text-rose-400 text-sm font-semibold">{loginError}</p>}
+
+            <button
+              type="submit"
+              className="w-full bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold py-3.5 rounded-xl transition shadow-lg"
+            >
+              התחבר לפאנל 🚀
+            </button>
+          </form>
+
+          <div className="mt-6 pt-4 border-t border-slate-700">
+            <Link href="/" className="text-xs text-slate-400 hover:text-white underline">
+              חזרה לטופס הניחושים
+            </Link>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  // הפאנל המלא לאחר התחברות
   return (
     <main className="max-w-2xl mx-auto px-4 py-8">
       <header className="text-center mb-8 border-b border-slate-800 pb-6">
+        <div className="flex justify-between items-center mb-4">
+          <span className="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-3 py-1 rounded-full font-semibold">
+            ● אדמין מחובר
+          </span>
+          <button
+            onClick={() => {
+              sessionStorage.removeItem('netgoals_admin_auth');
+              setIsAuthenticated(false);
+            }}
+            className="text-xs text-slate-400 hover:text-rose-400 underline"
+          >
+            התנתק
+          </button>
+        </div>
+
         <h1 className="text-4xl font-extrabold text-amber-400 mb-2">netgoals Admin</h1>
         <p className="text-slate-400 text-lg">ניהול תוצאות משחקים וחישוב נקודות ⚙️</p>
 
