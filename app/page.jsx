@@ -1,21 +1,37 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from './lib/supabase';
 
-const INITIAL_MATCHES = [
-  { id: '11111111-1111-1111-1111-111111111111', homeTeam: 'מכבי חיפה', awayTeam: 'מכבי תל אביב', time: 'שבת, 20:30', league: 'ליגת העל' },
-  { id: '22222222-2222-2222-2222-222222222222', homeTeam: 'בית"ר ירושלים', awayTeam: 'הפועל באר שבע', time: 'שבת, 19:30', league: 'ליגת העל' },
-  { id: '33333333-3333-3333-3333-333333333333', homeTeam: 'ברצלונה', awayTeam: 'ריאל מדריד', time: 'ראשון, 22:00', league: 'לה ליגה' },
-  { id: '44444444-4444-4444-4444-444444444444', homeTeam: 'ארסנל', awayTeam: 'מנצ\'סטר סיטי', time: 'ראשון, 18:30', league: 'פרמייר ליג' },
-  { id: '55555555-5555-5555-5555-555555555555', homeTeam: 'באיירן מינכן', awayTeam: 'בורוסיה דורטמונד', time: 'שבת, 19:30', league: 'בונדסליגה' },
-];
-
 export default function Home() {
+  const [matches, setMatches] = useState([]);
+  const [fetchingMatches, setFetchingMatches] = useState(true);
+
   const [userName, setUserName] = useState('');
   const [predictions, setPredictions] = useState({});
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    loadMatches();
+  }, []);
+
+  const loadMatches = async () => {
+    setFetchingMatches(true);
+    try {
+      const { data, error } = await supabase
+        .from('matches')
+        .select('*')
+        .order('created_at', { ascending: true });
+
+      if (error) throw error;
+      setMatches(data || []);
+    } catch (err) {
+      console.error('Error loading matches:', err);
+    } finally {
+      setFetchingMatches(false);
+    }
+  };
 
   const handleScoreChange = (matchId, team, value) => {
     setPredictions((prev) => ({
@@ -35,7 +51,6 @@ export default function Home() {
       const cleanName = userName.trim();
       let userId = null;
 
-      // 1. בדיקה אם קיים משתמש עם אותו השם
       const { data: existingProfiles } = await supabase
         .from('profiles')
         .select('id')
@@ -45,7 +60,6 @@ export default function Home() {
       if (existingProfiles && existingProfiles.length > 0) {
         userId = existingProfiles[0].id;
       } else {
-        // 2. יצירת משתמש חדש אם לא נמצא משתמש קיים
         userId = crypto.randomUUID();
         await supabase.from('profiles').insert([
           {
@@ -55,11 +69,9 @@ export default function Home() {
         ]);
       }
 
-      // 3. מחיקת ניחושים קודמים של המשתמש למשחקים האלה (מונע כפילויות)
       await supabase.from('predictions').delete().eq('user_id', userId);
 
-      // 4. שמירת הניחושים החדשים
-      const predictionInserts = INITIAL_MATCHES.map((match) => {
+      const predictionInserts = matches.map((match) => {
         const pred = predictions[match.id] || { home: '0', away: '0' };
         return {
           user_id: userId,
@@ -82,11 +94,11 @@ export default function Home() {
 
   const getWhatsAppShareLink = () => {
     let text = `⚽ *הניחושים של ${userName || 'משתמש'} ל-NetGoals:* \n\n`;
-    INITIAL_MATCHES.forEach((m) => {
+    matches.forEach((m) => {
       const pred = predictions[m.id] || {};
       const home = pred.home ?? '0';
       const away = pred.away ?? '0';
-      text += `• ${m.homeTeam} ${home} - ${away} ${m.awayTeam}\n`;
+      text += `• ${m.home_team} ${home} - ${away} ${m.away_team}\n`;
     });
     text += '\n🔥 בואו להילחם מולי בליגה: https://netgoals.co.il';
     return `https://wa.me/?text=${encodeURIComponent(text)}`;
@@ -109,10 +121,18 @@ export default function Home() {
         </div>
       </header>
 
-      {!submitted ? (
+      {fetchingMatches ? (
+        <div className="text-center py-12 text-slate-400 font-semibold">
+          טוען את משחקי המחזור... ⏳
+        </div>
+      ) : matches.length === 0 ? (
+        <div className="bg-slate-800 rounded-2xl p-8 border border-slate-700 text-center text-slate-300">
+          אין משחקים פעילים במחזור כרגע. חזרו בהמשך!
+        </div>
+      ) : !submitted ? (
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700/50 mb-6 text-center">
-            <h2 className="text-xl font-bold text-slate-200">מחזור 5 המשחקים המרכזיים</h2>
+            <h2 className="text-xl font-bold text-slate-200">מחזור המשחקים המרכזי</h2>
             <p className="text-sm text-slate-400">נחשו את התוצאות המדויקות למשחקי השבוע</p>
           </div>
 
@@ -130,15 +150,14 @@ export default function Home() {
             />
           </div>
 
-          {INITIAL_MATCHES.map((match) => (
+          {matches.map((match) => (
             <div key={match.id} className="bg-slate-800 rounded-2xl p-5 border border-slate-700 shadow-lg">
               <div className="flex justify-between items-center text-xs text-amber-400 mb-3">
-                <span className="font-semibold">{match.league}</span>
-                <span className="text-slate-400">{match.time}</span>
+                <span className="font-semibold">{match.league_name}</span>
               </div>
 
               <div className="grid grid-cols-7 items-center gap-2 text-center">
-                <span className="col-span-2 font-bold text-lg text-slate-100">{match.homeTeam}</span>
+                <span className="col-span-2 font-bold text-lg text-slate-100">{match.home_team}</span>
                 
                 <input
                   type="number"
@@ -162,7 +181,7 @@ export default function Home() {
                   onChange={(e) => handleScoreChange(match.id, 'away', e.target.value)}
                 />
 
-                <span className="col-span-2 font-bold text-lg text-slate-100">{match.awayTeam}</span>
+                <span className="col-span-2 font-bold text-lg text-slate-100">{match.away_team}</span>
               </div>
             </div>
           ))}
