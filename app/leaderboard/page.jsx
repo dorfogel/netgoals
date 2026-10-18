@@ -3,245 +3,404 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '../lib/supabase';
 
-const MATCHES_MAP = {
-  '11111111-1111-1111-1111-111111111111': { home: 'מכבי חיפה', away: 'מכבי תל אביב', league: 'ליגת העל' },
-  '22222222-2222-2222-2222-222222222222': { home: 'בית"ר ירושלים', away: 'הפועל באר שבע', league: 'ליגת העל' },
-  '33333333-3333-3333-3333-333333333333': { home: 'ברצלונה', away: 'ריאל מדריד', league: 'לה ליגה' },
-  '44444444-4444-4444-4444-444444444444': { home: 'ארסנל', away: 'מנצ\'סטר סיטי', league: 'פרמייר ליג' },
-  '55555555-5555-5555-5555-555555555555': { home: 'באיירן מינכן', away: 'בורוסיה דורטמונד', league: 'בונדסליגה' },
-};
+const ADMIN_PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || 'netgoals2026';
 
-export default function Leaderboard() {
-  const [leaderboard, setLeaderboard] = useState([]);
-  const [matchesData, setMatchesData] = useState({});
-  const [loading, setLoading] = useState(true);
-  const [selectedUser, setSelectedUser] = useState(null); // המשתמש שנבחר לצפייה בפירוט
+export default function AdminPanel() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [loginError, setLoginError] = useState('');
+
+  const [matches, setMatches] = useState([]);
+  const [actualScores, setActualScores] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [statusMessage, setStatusMessage] = useState('');
+
+  // שדות להוספת משחק חדש
+  const [newHomeTeam, setNewHomeTeam] = useState('');
+  const [newAwayTeam, setNewAwayTeam] = useState('');
+  const [newLeague, setNewLeague] = useState('ליגת העל');
 
   useEffect(() => {
-    fetchData();
+    const savedAuth = sessionStorage.getItem('netgoals_admin_auth');
+    if (savedAuth === 'true') {
+      setIsAuthenticated(true);
+      fetchMatches();
+    }
   }, []);
 
-  const fetchData = async () => {
+  const handleLogin = (e) => {
+    e.preventDefault();
+    if (passwordInput === ADMIN_PASSWORD) {
+      sessionStorage.setItem('netgoals_admin_auth', 'true');
+      setIsAuthenticated(true);
+      setLoginError('');
+      fetchMatches();
+    } else {
+      setLoginError('סיסמה שגויה. נסה שוב.');
+    }
+  };
+
+  // 1. שליפת כל המשחקים מ-Supabase
+  const fetchMatches = async () => {
     setLoading(true);
     try {
-      // 1. שליפת פרופילים
-      const { data: profiles, error: profilesError } = await supabase
-        .from('profiles')
-        .select('*');
-      if (profilesError) throw profilesError;
+      const { data, error } = await supabase
+        .from('matches')
+        .select('*')
+        .order('created_at', { ascending: true });
 
-      // 2. שליפת ניחושים
-      const { data: predictions, error: predError } = await supabase
-        .from('predictions')
-        .select('*');
-      if (predError) throw predError;
+      if (error) throw error;
 
-      // 3. שליפת תוצאות אמת של משחקים
-      const { data: matches } = await supabase.from('matches').select('*');
-      const matchesDict = {};
-      (matches || []).forEach((m) => {
-        matchesDict[m.id] = m;
+      setMatches(data || []);
+
+      const scores = {};
+      (data || []).forEach((m) => {
+        if (m.home_score !== null && m.home_score !== undefined && m.away_score !== null && m.away_score !== undefined) {
+          scores[m.id] = { home: m.home_score, away: m.away_score };
+        }
       });
-      setMatchesData(matchesDict);
-
-      // 4. חישוב לכל משתמש
-      const userScores = (profiles || []).map((profile) => {
-        const userPreds = (predictions || []).filter((p) => p.user_id === profile.id);
-        const totalPoints = userPreds.reduce((sum, p) => sum + (p.points_earned || 0), 0);
-
-        return {
-          id: profile.id,
-          name: profile.full_name || 'משתמש אנונימי',
-          points: totalPoints,
-          predictionsCount: userPreds.length,
-          predictions: userPreds,
-        };
-      });
-
-      userScores.sort((a, b) => b.points - a.points);
-      setLeaderboard(userScores);
+      setActualScores(scores);
     } catch (err) {
-      console.error('Error loading leaderboard:', err);
+      console.error('Error fetching matches:', err);
     } finally {
       setLoading(false);
     }
   };
 
+  // 2. הוספת משחק חדש
+  const handleAddMatch = async (e) => {
+    e.preventDefault();
+    if (!newHomeTeam.trim() || !newAwayTeam.trim()) return;
+
+    setLoading(true);
+    setStatusMessage('');
+
+    try {
+      const newMatchId = crypto.randomUUID();
+      const { error } = await supabase.from('matches').insert([
+        {
+          id: newMatchId,
+          home_team: newHomeTeam.trim(),
+          away_team: newAwayTeam.trim(),
+          league_name: newLeague.trim(),
+          match_time: new Date().toISOString(),
+          status: 'scheduled',
+        },
+      ]);
+
+      if (error) throw error;
+
+      setNewHomeTeam('');
+      setNewAwayTeam('');
+      setStatusMessage('✅ המשחק נוסף בהצלחה למחזור!');
+      await fetchMatches();
+    } catch (err) {
+      console.error('Error adding match:', err);
+      setStatusMessage('❌ שגיאה בהוספת המשחק.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 3. מחיקת משחק
+  const handleDeleteMatch = async (matchId) => {
+    if (!confirm('האם למחוק את המשחק ואת כל הניחושים הקשורים אליו?')) return;
+
+    setLoading(true);
+    try {
+      await supabase.from('predictions').delete().eq('match_id', matchId);
+      await supabase.from('matches').delete().eq('id', matchId);
+      setStatusMessage('🗑️ המשחק נמחק בהצלחה.');
+      await fetchMatches();
+    } catch (err) {
+      console.error('Error deleting match:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleScoreInput = (matchId, team, value) => {
+    setActualScores((prev) => ({
+      ...prev,
+      [matchId]: {
+        ...prev[matchId],
+        [team]: value,
+      },
+    }));
+  };
+
+  // 4. שמירת תוצאות וחישוב נקודות
+  const handleSaveAllAndCalculate = async () => {
+    setLoading(true);
+    setStatusMessage('');
+
+    try {
+      const { data: predictions, error: predErr } = await supabase
+        .from('predictions')
+        .select('*');
+
+      if (predErr) throw predErr;
+
+      let updatedCount = 0;
+
+      for (const match of matches) {
+        const scoreData = actualScores[match.id];
+        if (!scoreData || scoreData.home === '' || scoreData.away === '' || scoreData.home === undefined || scoreData.away === undefined) {
+          continue;
+        }
+
+        const homeActual = parseInt(scoreData.home, 10);
+        const awayActual = parseInt(scoreData.away, 10);
+
+        await supabase
+          .from('matches')
+          .update({
+            home_score: homeActual,
+            away_score: awayActual,
+            status: 'finished',
+          })
+          .eq('id', match.id);
+
+        const matchPredictions = (predictions || []).filter((p) => p.match_id === match.id);
+
+        for (const pred of matchPredictions) {
+          const homePred = pred.home_score_pred;
+          const awayPred = pred.away_score_pred;
+
+          let points = 0;
+
+          if (homePred === homeActual && awayPred === awayActual) {
+            points = 3;
+          } else {
+            const actualOutcome = Math.sign(homeActual - awayActual);
+            const predOutcome = Math.sign(homePred - awayPred);
+
+            if (actualOutcome === predOutcome) {
+              points = 1;
+            }
+          }
+
+          await supabase
+            .from('predictions')
+            .update({ points_earned: points })
+            .eq('id', pred.id);
+        }
+
+        updatedCount++;
+      }
+
+      setStatusMessage(`✅ עדכון התוצאות והנקודות הושלם עבור ${updatedCount} משחקים!`);
+      await fetchMatches();
+    } catch (err) {
+      console.error('Error calculating scores:', err);
+      setStatusMessage('❌ אירעה שגיאה בחישוב התוצאות.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!isAuthenticated) {
+    return (
+      <main className="max-w-md mx-auto px-4 py-16">
+        <div className="bg-slate-800 rounded-2xl p-8 border border-slate-700 shadow-xl text-center">
+          <div className="text-4xl mb-3">🔒</div>
+          <h1 className="text-2xl font-bold text-amber-400 mb-2">כניסת מנהל למערכת</h1>
+          <p className="text-sm text-slate-400 mb-6">הזן סיסמת אדמין כדי לגשת לפאנל הניהול</p>
+
+          <form onSubmit={handleLogin} className="space-y-4">
+            <input
+              type="password"
+              required
+              placeholder="הכנס סיסמת אדמין"
+              value={passwordInput}
+              onChange={(e) => setPasswordInput(e.target.value)}
+              className="w-full bg-slate-900 border border-slate-600 text-white text-center rounded-xl px-4 py-3 outline-none focus:border-amber-400"
+            />
+            {loginError && <p className="text-rose-400 text-sm font-semibold">{loginError}</p>}
+            <button
+              type="submit"
+              className="w-full bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold py-3.5 rounded-xl transition shadow-lg"
+            >
+              התחבר לפאנל 🚀
+            </button>
+          </form>
+
+          <div className="mt-6 pt-4 border-t border-slate-700">
+            <Link href="/" className="text-xs text-slate-400 hover:text-white underline">
+              חזרה לטופס הניחושים
+            </Link>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="max-w-2xl mx-auto px-4 py-8">
-      {/* Header */}
       <header className="text-center mb-8 border-b border-slate-800 pb-6">
-        <h1 className="text-4xl font-extrabold text-amber-400 mb-2">netgoals.co.il</h1>
-        <p className="text-slate-400 text-lg">טבלת המובילים הקהילתית 🏆</p>
-        
+        <div className="flex justify-between items-center mb-4">
+          <span className="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-3 py-1 rounded-full font-semibold">
+            ● אדמין מחובר
+          </span>
+          <button
+            onClick={() => {
+              sessionStorage.removeItem('netgoals_admin_auth');
+              setIsAuthenticated(false);
+            }}
+            className="text-xs text-slate-400 hover:text-rose-400 underline"
+          >
+            התנתק
+          </button>
+        </div>
+
+        <h1 className="text-4xl font-extrabold text-amber-400 mb-2">netgoals Admin</h1>
+        <p className="text-slate-400 text-lg">ניהול מחזורים, משחקים ותוצאות ⚙️</p>
+
         <div className="flex justify-center gap-4 mt-6">
+          <Link
+            href="/leaderboard"
+            className="bg-amber-400 hover:bg-amber-300 text-slate-950 px-5 py-2.5 rounded-xl text-sm font-bold transition shadow-md"
+          >
+            🏆 מעבר לטבלת המובילים
+          </Link>
           <Link
             href="/"
             className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-5 py-2.5 rounded-xl text-sm font-bold border border-slate-700 transition"
           >
             ⚽ לטופס הניחושים
           </Link>
-          <button
-            onClick={fetchData}
-            className="bg-amber-400 hover:bg-amber-300 text-slate-950 px-5 py-2.5 rounded-xl text-sm font-bold transition shadow-md"
-          >
-            🔄 רענון טבלה
-          </button>
         </div>
       </header>
 
-      {/* Leaderboard Table */}
-      <div className="bg-slate-800 rounded-2xl border border-slate-700 shadow-xl overflow-hidden">
-        <div className="p-4 bg-slate-800/80 border-b border-slate-700 flex justify-between items-center">
-          <span className="font-bold text-slate-200">דירוג מנחשים</span>
-          <span className="text-xs text-amber-400 font-medium">💡 לחץ על מנחש לצפייה בניחושים שלו</span>
-        </div>
-
-        {loading ? (
-          <div className="text-center py-12 text-slate-400 font-semibold">
-            טוען נתונים מציגים... ⏳
-          </div>
-        ) : leaderboard.length === 0 ? (
-          <div className="text-center py-12 text-slate-400">
-            עדיין אין מנחשים בטבלה. היו הראשונים לנחש!
-          </div>
-        ) : (
-          <div className="divide-y divide-slate-700/50">
-            {leaderboard.map((user, index) => {
-              const rank = index + 1;
-              let badge = `${rank}`;
-              let rankStyle = 'text-slate-400 bg-slate-900/50';
-
-              if (rank === 1) {
-                badge = '🥇';
-                rankStyle = 'bg-amber-400/10 text-amber-400 border border-amber-400/30';
-              } else if (rank === 2) {
-                badge = '🥈';
-                rankStyle = 'bg-slate-300/10 text-slate-300 border border-slate-300/30';
-              } else if (rank === 3) {
-                badge = '🥉';
-                rankStyle = 'bg-amber-700/10 text-amber-600 border border-amber-700/30';
-              }
-
-              return (
-                <div
-                  key={user.id}
-                  onClick={() => setSelectedUser(user)}
-                  className="flex items-center justify-between p-4 hover:bg-slate-700/40 cursor-pointer transition group"
-                >
-                  <div className="flex items-center gap-4">
-                    <span className={`w-9 h-9 flex items-center justify-center rounded-xl font-extrabold text-sm ${rankStyle}`}>
-                      {badge}
-                    </span>
-                    <div>
-                      <h3 className="font-bold text-slate-100 text-base group-hover:text-amber-400 transition">
-                        {user.name}
-                      </h3>
-                      <p className="text-xs text-slate-400">{user.predictionsCount} ניחושים במערכת</p>
-                    </div>
-                  </div>
-
-                  <div className="text-left flex items-center gap-3">
-                    <div>
-                      <span className="text-xl font-black text-amber-400">{user.points}</span>
-                      <span className="text-xs text-slate-400 block font-semibold">נקודות</span>
-                    </div>
-                    <span className="text-slate-500 group-hover:text-amber-400 text-sm font-bold transition">👁️</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Modal: User Predictions Details */}
-      {selectedUser && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-800 border border-slate-700 rounded-2xl max-w-lg w-full p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
-            
-            {/* Modal Header */}
-            <div className="flex justify-between items-center border-b border-slate-700 pb-4 mb-4">
-              <div>
-                <h2 className="text-xl font-extrabold text-amber-400">הניחושים של {selectedUser.name}</h2>
-                <p className="text-xs text-slate-400">סך הכל: {selectedUser.points} נקודות</p>
-              </div>
-              <button
-                onClick={() => setSelectedUser(null)}
-                className="text-slate-400 hover:text-white text-2xl font-bold p-1"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Predictions List */}
-            <div className="space-y-4">
-              {Object.keys(MATCHES_MAP).map((matchId) => {
-                const matchInfo = MATCHES_MAP[matchId];
-                const pred = selectedUser.predictions.find((p) => p.match_id === matchId);
-                const actualMatch = matchesData[matchId];
-
-                const hasActualScore =
-                  actualMatch &&
-                  actualMatch.home_score !== null &&
-                  actualMatch.away_score !== null;
-
-                const pointsEarned = pred ? pred.points_earned || 0 : 0;
-
-                return (
-                  <div key={matchId} className="bg-slate-900/70 border border-slate-700/60 rounded-xl p-4">
-                    <div className="flex justify-between items-center text-xs text-amber-400/80 mb-2">
-                      <span>{matchInfo.league}</span>
-                      {hasActualScore ? (
-                        <span className="bg-slate-800 text-slate-300 px-2 py-0.5 rounded border border-slate-700 font-mono">
-                          תוצאת אמת: {actualMatch.home_score} - {actualMatch.away_score}
-                        </span>
-                      ) : (
-                        <span className="text-slate-500">טרם הסתיים</span>
-                      )}
-                    </div>
-
-                    <div className="flex justify-between items-center text-sm font-bold text-slate-200">
-                      <span>{matchInfo.home}</span>
-                      
-                      <div className="bg-slate-800 border border-slate-600 px-3 py-1 rounded-lg text-amber-400 text-base font-mono">
-                        {pred ? `${pred.home_score_pred} - ${pred.away_score_pred}` : 'לא ניחש'}
-                      </div>
-
-                      <span>{matchInfo.away}</span>
-                    </div>
-
-                    {hasActualScore && (
-                      <div className="mt-2 text-left text-xs">
-                        {pointsEarned === 3 ? (
-                          <span className="text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/30">
-                            🎯 בול פגיעה! (+3 נק')
-                          </span>
-                        ) : pointsEarned === 1 ? (
-                          <span className="text-amber-400 font-bold bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30">
-                            ✅ בינגו בכיוון! (+1 נק')
-                          </span>
-                        ) : (
-                          <span className="text-slate-500 font-semibold">פספוס (0 נק')</span>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Close Button */}
-            <button
-              onClick={() => setSelectedUser(null)}
-              className="w-full bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 rounded-xl transition mt-6 text-sm"
-            >
-              סגור חלון
-            </button>
-
-          </div>
+      {statusMessage && (
+        <div className="mb-6 p-4 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-center font-bold rounded-xl">
+          {statusMessage}
         </div>
       )}
+
+      {/* Form: Add New Match */}
+      <section className="bg-slate-800 rounded-2xl p-6 border border-slate-700 shadow-xl mb-8">
+        <h2 className="text-xl font-bold text-amber-400 mb-4 flex items-center gap-2">
+          ➕ הוספת משחק חדש למחזור
+        </h2>
+
+        <form onSubmit={handleAddMatch} className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1 font-semibold">קבוצת בית:</label>
+              <input
+                type="text"
+                required
+                placeholder="למשל: מכבי נתניה"
+                value={newHomeTeam}
+                onChange={(e) => setNewHomeTeam(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-600 text-white rounded-lg px-3 py-2 text-sm outline-none focus:border-amber-400"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1 font-semibold">קבוצת חוץ:</label>
+              <input
+                type="text"
+                required
+                placeholder="למשל: הפועל תל אביב"
+                value={newAwayTeam}
+                onChange={(e) => setNewAwayTeam(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-600 text-white rounded-lg px-3 py-2 text-sm outline-none focus:border-amber-400"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs text-slate-400 mb-1 font-semibold">שם הליגה / במסגרת:</label>
+            <input
+              type="text"
+              required
+              placeholder="למשל: ליגת העל / צ'מפיונס ליג"
+              value={newLeague}
+              onChange={(e) => setNewLeague(e.target.value)}
+              className="w-full bg-slate-900 border border-slate-600 text-white rounded-lg px-3 py-2 text-sm outline-none focus:border-amber-400"
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold py-3 rounded-xl transition shadow-md disabled:opacity-50"
+          >
+            {loading ? 'מוסיף משחק...' : 'הוסף משחק למערכת 🚀'}
+          </button>
+        </form>
+      </section>
+
+      {/* List & Score Management */}
+      <section className="space-y-6">
+        <h2 className="text-xl font-bold text-slate-200 border-b border-slate-700 pb-2">
+          ⚽ משחקי המחזור הנוכחי ({matches.length})
+        </h2>
+
+        {matches.length === 0 ? (
+          <div className="bg-slate-800 rounded-2xl p-8 border border-slate-700 text-center text-slate-400">
+            אין משחקים פעילים במחזור. השתמש בטופס למעלה כדי להוסיף משחקים!
+          </div>
+        ) : (
+          matches.map((match) => {
+            const score = actualScores[match.id] || { home: '', away: '' };
+
+            return (
+              <div key={match.id} className="bg-slate-800 rounded-2xl p-5 border border-slate-700 shadow-lg relative">
+                <div className="flex justify-between items-center text-xs font-semibold text-amber-400 mb-3">
+                  <span>{match.league_name}</span>
+                  <button
+                    onClick={() => handleDeleteMatch(match.id)}
+                    className="text-slate-500 hover:text-rose-400 transition"
+                    title="מחק משחק"
+                  >
+                    🗑️ מחק
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-7 items-center gap-2 text-center">
+                  <span className="col-span-2 font-bold text-lg text-slate-100">{match.home_team}</span>
+
+                  <input
+                    type="number"
+                    min="0"
+                    max="9"
+                    placeholder="-"
+                    value={score.home ?? ''}
+                    className="col-span-1 bg-slate-900 border border-slate-600 text-white text-center text-xl rounded-lg py-2 focus:border-amber-400 outline-none"
+                    onChange={(e) => handleScoreInput(match.id, 'home', e.target.value)}
+                  />
+
+                  <span className="col-span-1 text-slate-500 font-bold">:</span>
+
+                  <input
+                    type="number"
+                    min="0"
+                    max="9"
+                    placeholder="-"
+                    value={score.away ?? ''}
+                    className="col-span-1 bg-slate-900 border border-slate-600 text-white text-center text-xl rounded-lg py-2 focus:border-amber-400 outline-none"
+                    onChange={(e) => handleScoreInput(match.id, 'away', e.target.value)}
+                  />
+
+                  <span className="col-span-2 font-bold text-lg text-slate-100">{match.away_team}</span>
+                </div>
+              </div>
+            );
+          })
+        )}
+
+        {matches.length > 0 && (
+          <button
+            onClick={handleSaveAllAndCalculate}
+            disabled={loading}
+            className="w-full bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-xl py-4 rounded-xl transition shadow-lg mt-8 disabled:opacity-50"
+          >
+            {loading ? 'מחשב נקודות...' : 'שמור תוצאות וחשב נקודות ⚡'}
+          </button>
+        )}
+      </section>
     </main>
   );
 }
