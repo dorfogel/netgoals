@@ -3,19 +3,12 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '../lib/supabase';
 
-const MATCHES_MAP = {
-  '11111111-1111-1111-1111-111111111111': { home: 'מכבי חיפה', away: 'מכבי תל אביב', league: 'ליגת העל' },
-  '22222222-2222-2222-2222-222222222222': { home: 'בית"ר ירושלים', away: 'הפועל באר שבע', league: 'ליגת העל' },
-  '33333333-3333-3333-3333-333333333333': { home: 'ברצלונה', away: 'ריאל מדריד', league: 'לה ליגה' },
-  '44444444-4444-4444-4444-444444444444': { home: 'ארסנל', away: 'מנצ\'סטר סיטי', league: 'פרמייר ליג' },
-  '55555555-5555-5555-5555-555555555555': { home: 'באיירן מינכן', away: 'בורוסיה דורטמונד', league: 'בונדסליגה' },
-};
-
 export default function Leaderboard() {
   const [leaderboard, setLeaderboard] = useState([]);
-  const [matchesData, setMatchesData] = useState({});
+  const [matchesList, setMatchesList] = useState([]);
+  const [matchesMap, setMatchesMap] = useState({});
   const [loading, setLoading] = useState(true);
-  const [selectedUser, setSelectedUser] = useState(null); // המשתמש שנבחר לצפייה בפירוט
+  const [selectedUser, setSelectedUser] = useState(null);
 
   useEffect(() => {
     fetchData();
@@ -24,27 +17,28 @@ export default function Leaderboard() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      // 1. שליפת פרופילים
       const { data: profiles, error: profilesError } = await supabase
         .from('profiles')
         .select('*');
       if (profilesError) throw profilesError;
 
-      // 2. שליפת ניחושים
       const { data: predictions, error: predError } = await supabase
         .from('predictions')
         .select('*');
       if (predError) throw predError;
 
-      // 3. שליפת תוצאות אמת של משחקים
-      const { data: matches } = await supabase.from('matches').select('*');
-      const matchesDict = {};
-      (matches || []).forEach((m) => {
-        matchesDict[m.id] = m;
-      });
-      setMatchesData(matchesDict);
+      const { data: matches } = await supabase
+        .from('matches')
+        .select('*')
+        .order('created_at', { ascending: true });
 
-      // 4. חישוב לכל משתמש
+      setMatchesList(matches || []);
+      const dict = {};
+      (matches || []).forEach((m) => {
+        dict[m.id] = m;
+      });
+      setMatchesMap(dict);
+
       const userScores = (profiles || []).map((profile) => {
         const userPreds = (predictions || []).filter((p) => p.user_id === profile.id);
         const totalPoints = userPreds.reduce((sum, p) => sum + (p.points_earned || 0), 0);
@@ -160,7 +154,6 @@ export default function Leaderboard() {
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-slate-800 border border-slate-700 rounded-2xl max-w-lg w-full p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
             
-            {/* Modal Header */}
             <div className="flex justify-between items-center border-b border-slate-700 pb-4 mb-4">
               <div>
                 <h2 className="text-xl font-extrabold text-amber-400">הניחושים של {selectedUser.name}</h2>
@@ -174,27 +167,24 @@ export default function Leaderboard() {
               </button>
             </div>
 
-            {/* Predictions List */}
             <div className="space-y-4">
-              {Object.keys(MATCHES_MAP).map((matchId) => {
-                const matchInfo = MATCHES_MAP[matchId];
-                const pred = selectedUser.predictions.find((p) => p.match_id === matchId);
-                const actualMatch = matchesData[matchId];
-
+              {matchesList.map((match) => {
+                const pred = selectedUser.predictions.find((p) => p.match_id === match.id);
                 const hasActualScore =
-                  actualMatch &&
-                  actualMatch.home_score !== null &&
-                  actualMatch.away_score !== null;
+                  match.home_score !== null &&
+                  match.home_score !== undefined &&
+                  match.away_score !== null &&
+                  match.away_score !== undefined;
 
                 const pointsEarned = pred ? pred.points_earned || 0 : 0;
 
                 return (
-                  <div key={matchId} className="bg-slate-900/70 border border-slate-700/60 rounded-xl p-4">
+                  <div key={match.id} className="bg-slate-900/70 border border-slate-700/60 rounded-xl p-4">
                     <div className="flex justify-between items-center text-xs text-amber-400/80 mb-2">
-                      <span>{matchInfo.league}</span>
+                      <span>{match.league_name}</span>
                       {hasActualScore ? (
                         <span className="bg-slate-800 text-slate-300 px-2 py-0.5 rounded border border-slate-700 font-mono">
-                          תוצאת אמת: {actualMatch.home_score} - {actualMatch.away_score}
+                          תוצאת אמת: {match.home_score} - {match.away_score}
                         </span>
                       ) : (
                         <span className="text-slate-500">טרם הסתיים</span>
@@ -202,13 +192,13 @@ export default function Leaderboard() {
                     </div>
 
                     <div className="flex justify-between items-center text-sm font-bold text-slate-200">
-                      <span>{matchInfo.home}</span>
+                      <span>{match.home_team}</span>
                       
                       <div className="bg-slate-800 border border-slate-600 px-3 py-1 rounded-lg text-amber-400 text-base font-mono">
                         {pred ? `${pred.home_score_pred} - ${pred.away_score_pred}` : 'לא ניחש'}
                       </div>
 
-                      <span>{matchInfo.away}</span>
+                      <span>{match.away_team}</span>
                     </div>
 
                     {hasActualScore && (
@@ -231,7 +221,6 @@ export default function Leaderboard() {
               })}
             </div>
 
-            {/* Close Button */}
             <button
               onClick={() => setSelectedUser(null)}
               className="w-full bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 rounded-xl transition mt-6 text-sm"
