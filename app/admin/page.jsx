@@ -19,6 +19,7 @@ export default function AdminPanel() {
   const [newHomeTeam, setNewHomeTeam] = useState('');
   const [newAwayTeam, setNewAwayTeam] = useState('');
   const [newLeague, setNewLeague] = useState('ליגת העל');
+  const [newMatchTime, setNewMatchTime] = useState('');
 
   useEffect(() => {
     const savedAuth = sessionStorage.getItem('netgoals_admin_auth');
@@ -40,7 +41,6 @@ export default function AdminPanel() {
     }
   };
 
-  // 1. שליפת כל המשחקים מ-Supabase
   const fetchMatches = async () => {
     setLoading(true);
     try {
@@ -67,7 +67,6 @@ export default function AdminPanel() {
     }
   };
 
-  // 2. הוספת משחק חדש
   const handleAddMatch = async (e) => {
     e.preventDefault();
     if (!newHomeTeam.trim() || !newAwayTeam.trim()) return;
@@ -77,13 +76,15 @@ export default function AdminPanel() {
 
     try {
       const newMatchId = crypto.randomUUID();
+      const matchTimestamp = newMatchTime ? new Date(newMatchTime).toISOString() : new Date().toISOString();
+
       const { error } = await supabase.from('matches').insert([
         {
           id: newMatchId,
           home_team: newHomeTeam.trim(),
           away_team: newAwayTeam.trim(),
           league_name: newLeague.trim(),
-          match_time: new Date().toISOString(),
+          match_time: matchTimestamp,
           status: 'scheduled',
         },
       ]);
@@ -92,6 +93,7 @@ export default function AdminPanel() {
 
       setNewHomeTeam('');
       setNewAwayTeam('');
+      setNewMatchTime('');
       setStatusMessage('✅ המשחק נוסף בהצלחה למחזור!');
       await fetchMatches();
     } catch (err) {
@@ -102,7 +104,6 @@ export default function AdminPanel() {
     }
   };
 
-  // 3. מחיקת משחק
   const handleDeleteMatch = async (matchId) => {
     if (!confirm('האם למחוק את המשחק ואת כל הניחושים הקשורים אליו?')) return;
 
@@ -129,7 +130,6 @@ export default function AdminPanel() {
     }));
   };
 
-  // 4. שמירת תוצאות וחישוב נקודות
   const handleSaveAllAndCalculate = async () => {
     setLoading(true);
     setStatusMessage('');
@@ -310,16 +310,29 @@ export default function AdminPanel() {
             </div>
           </div>
 
-          <div>
-            <label className="block text-xs text-slate-400 mb-1 font-semibold">שם הליגה / במסגרת:</label>
-            <input
-              type="text"
-              required
-              placeholder="למשל: ליגת העל / צ'מפיונס ליג"
-              value={newLeague}
-              onChange={(e) => setNewLeague(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-600 text-white rounded-lg px-3 py-2 text-sm outline-none focus:border-amber-400"
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1 font-semibold">מסגרת / ליגה:</label>
+              <input
+                type="text"
+                required
+                placeholder="למשל: ליגת העל"
+                value={newLeague}
+                onChange={(e) => setNewLeague(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-600 text-white rounded-lg px-3 py-2 text-sm outline-none focus:border-amber-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs text-amber-400 mb-1 font-semibold">⏰ מועד שריקת פתיחה (נעילה):</label>
+              <input
+                type="datetime-local"
+                required
+                value={newMatchTime}
+                onChange={(e) => setNewMatchTime(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-600 text-white rounded-lg px-3 py-2 text-sm outline-none focus:border-amber-400"
+              />
+            </div>
           </div>
 
           <button
@@ -345,11 +358,21 @@ export default function AdminPanel() {
         ) : (
           matches.map((match) => {
             const score = actualScores[match.id] || { home: '', away: '' };
+            const matchDate = match.match_time ? new Date(match.match_time) : null;
+            const isPast = matchDate ? new Date() > matchDate : false;
 
             return (
               <div key={match.id} className="bg-slate-800 rounded-2xl p-5 border border-slate-700 shadow-lg relative">
                 <div className="flex justify-between items-center text-xs font-semibold text-amber-400 mb-3">
-                  <span>{match.league_name}</span>
+                  <div className="flex items-center gap-2">
+                    <span>{match.league_name}</span>
+                    {matchDate && (
+                      <span className={`px-2 py-0.5 rounded text-[11px] font-mono ${isPast ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' : 'bg-slate-700 text-slate-300'}`}>
+                        {isPast ? '🔒 נעול (' + matchDate.toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' }) + ')' : '⏰ ' + matchDate.toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' })}
+                      </span>
+                    )}
+                  </div>
+
                   <button
                     onClick={() => handleDeleteMatch(match.id)}
                     className="text-slate-500 hover:text-rose-400 transition"
