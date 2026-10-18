@@ -130,17 +130,23 @@ export default function Home() {
 
   return (
     <main className="max-w-2xl mx-auto px-4 py-8">
-      {/* Header */}
+{/* Header */}
       <header className="text-center mb-8 border-b border-slate-800 pb-6">
         <h1 className="text-4xl font-extrabold text-amber-400 mb-2">netgoals.co.il</h1>
         <p className="text-slate-400 text-lg">גולים ברשת • מערכת הניחושים הקהילתית</p>
         
-        <div className="mt-6">
+        <div className="flex justify-center gap-3 mt-6">
           <Link
             href="/leaderboard"
-            className="inline-flex items-center gap-2 bg-amber-400/10 hover:bg-amber-400/20 text-amber-400 border border-amber-400/30 px-5 py-2.5 rounded-xl font-bold transition text-sm"
+            className="inline-flex items-center gap-2 bg-amber-400/10 hover:bg-amber-400/20 text-amber-400 border border-amber-400/30 px-4 py-2 rounded-xl font-bold transition text-sm"
           >
-            🏆 לצפייה בטבלת המובילים הכללית
+            🏆 טבלת המובילים
+          </Link>
+          <Link
+            href="/profile"
+            className="inline-flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-4 py-2 rounded-xl font-bold transition text-sm"
+          >
+            👤 הפרופיל שלי
           </Link>
         </div>
       </header>
