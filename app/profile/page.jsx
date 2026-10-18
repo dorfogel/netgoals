@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '../lib/supabase';
 
@@ -8,6 +8,7 @@ export default function ProfilePage() {
   const [userProfile, setUserProfile] = useState(null);
   const [userPredictions, setUserPredictions] = useState([]);
   const [matchesMap, setMatchesMap] = useState({});
+  const [isTopRank, setIsTopRank] = useState(false);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
 
@@ -19,6 +20,7 @@ export default function ProfilePage() {
     setSearched(true);
     setUserProfile(null);
     setUserPredictions([]);
+    setIsTopRank(false);
 
     try {
       const cleanName = searchName.trim();
@@ -52,6 +54,21 @@ export default function ProfilePage() {
           dict[m.id] = m;
         });
         setMatchesMap(dict);
+
+        // 4. בדיקה אם המשתמש במקום הראשון בטבלה
+        const { data: allProfiles } = await supabase.from('profiles').select('*');
+        const { data: allPreds } = await supabase.from('predictions').select('*');
+
+        const scores = (allProfiles || []).map((p) => {
+          const pPreds = (allPreds || []).filter((pred) => pred.user_id === p.id);
+          const totalPts = pPreds.reduce((sum, pred) => sum + (pred.points_earned || 0), 0);
+          return { id: p.id, points: totalPts };
+        });
+
+        scores.sort((a, b) => b.points - a.points);
+        if (scores.length > 0 && scores[0].id === profile.id && scores[0].points > 0) {
+          setIsTopRank(true);
+        }
       }
     } catch (err) {
       console.error('Error fetching profile history:', err);
@@ -60,29 +77,33 @@ export default function ProfilePage() {
     }
   };
 
-  // חישוב סטטיסטיקות
+  // חישוב סטטיסטיקות ותגים
   const totalPoints = userPredictions.reduce((sum, p) => sum + (p.points_earned || 0), 0);
   const exactHits = userPredictions.filter((p) => p.points_earned === 3).length;
   const directionHits = userPredictions.filter((p) => p.points_earned === 1).length;
   const avgPoints = userPredictions.length > 0 ? (totalPoints / userPredictions.length).toFixed(1) : '0';
+
+  // חישוב רצף פגיעות פעיל
+  const recentPoints = userPredictions.slice(-3).map((p) => p.points_earned || 0);
+  const isHotStreak = recentPoints.length >= 3 && recentPoints.every((pts) => pts > 0);
 
   return (
     <main className="max-w-2xl mx-auto px-4 py-8">
       {/* Header */}
       <header className="text-center mb-8 border-b border-slate-800 pb-6">
         <h1 className="text-4xl font-extrabold text-amber-400 mb-2">netgoals.co.il</h1>
-        <p className="text-slate-400 text-lg">פרופיל אישי והיסטוריית ניחושים 👤</p>
+        <p className="text-slate-400 text-lg">פרופיל אישי ותגיות הישגים 👤</p>
 
-        <div className="flex justify-center gap-4 mt-6">
+        <div className="flex justify-center gap-3 mt-6">
           <Link
             href="/"
-            className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-5 py-2.5 rounded-xl text-sm font-bold border border-slate-700 transition"
+            className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2.5 rounded-xl text-sm font-bold border border-slate-700 transition"
           >
             ⚽ לטופס הניחושים
           </Link>
           <Link
             href="/leaderboard"
-            className="bg-amber-400 hover:bg-amber-300 text-slate-950 px-5 py-2.5 rounded-xl text-sm font-bold transition shadow-md"
+            className="bg-amber-400 hover:bg-amber-300 text-slate-950 px-4 py-2.5 rounded-xl text-sm font-bold transition shadow-md"
           >
             🏆 לטבלת המובילים
           </Link>
@@ -120,7 +141,7 @@ export default function ProfilePage() {
         <>
           {!userProfile ? (
             <div className="bg-slate-800 rounded-2xl p-8 border border-slate-700 text-center text-slate-400">
-              לא נמצא פרופיל בשם <strong className="text-white">"{searchName}"</strong>. ודא שהקשת את השם בדיוק כפי שהוזן בטופס הניחושים.
+              לא נמצא פרופיל בשם <strong className="text-white">"{searchName}"</strong>.
             </div>
           ) : (
             <div className="space-y-6">
@@ -131,6 +152,33 @@ export default function ProfilePage() {
                 </div>
                 <h2 className="text-2xl font-extrabold text-white mb-1">{userProfile.full_name}</h2>
                 <p className="text-xs text-slate-400 mb-6">כרטיס שחקן ב-NetGoals</p>
+
+                {/* Badges Section */}
+                <div className="mb-6 pt-4 border-t border-slate-700/60">
+                  <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">תגיות והישגים</h3>
+                  <div className="flex flex-wrap justify-center gap-2">
+                    {isTopRank && (
+                      <span className="bg-amber-400/10 text-amber-400 border border-amber-400/30 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5">
+                        👑 מלך הליגה (מקום 1)
+                      </span>
+                    )}
+                    {exactHits >= 3 && (
+                      <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5">
+                        🎯 מלך הבול פגיעה
+                      </span>
+                    )}
+                    {isHotStreak && (
+                      <span className="bg-rose-500/10 text-rose-400 border border-rose-500/30 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5">
+                        🔥 ברצף חם (3 פגיעות רצופות)
+                      </span>
+                    )}
+                    {userPredictions.length > 0 && (
+                      <span className="bg-sky-500/10 text-sky-400 border border-sky-500/30 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5">
+                        ⚡ מנחש פעיל
+                      </span>
+                    )}
+                  </div>
+                </div>
 
                 {/* Stats Grid */}
                 <div className="grid grid-cols-4 gap-2 bg-slate-900/80 p-4 rounded-xl border border-slate-700/60">
