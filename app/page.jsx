@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import { supabase } from './lib/supabase';
 
 const INITIAL_MATCHES = [
   { id: '1', homeTeam: 'מכבי חיפה', awayTeam: 'מכבי תל אביב', time: 'שבת, 20:30', league: 'ליגת העל' },
@@ -10,8 +11,11 @@ const INITIAL_MATCHES = [
 ];
 
 export default function Home() {
+  const [userName, setUserName] = useState('');
   const [predictions, setPredictions] = useState({});
   const [submitted, setSubmitted] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
 
   const handleScoreChange = (matchId, team, value) => {
     setPredictions((prev) => ({
@@ -23,17 +27,59 @@ export default function Home() {
     }));
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    setSubmitted(true);
+    setLoading(true);
+    setErrorMessage('');
+
+    try {
+      // 1. יצירת/עדכון פרופיל זמני למשתמש לפי השם שהזין
+      const tempUserId = crypto.randomUUID();
+      
+      const { error: profileError } = await supabase.from('profiles').insert([
+        {
+          id: tempUserId,
+          full_name: userName,
+        },
+      ]);
+
+      if (profileError) {
+        console.error('Error saving profile:', profileError);
+      }
+
+      // 2. הכנת הניחושים להכנסה ל-Database
+      const predictionInserts = INITIAL_MATCHES.map((match) => {
+        const pred = predictions[match.id] || { home: '0', away: '0' };
+        return {
+          user_id: tempUserId,
+          match_id: match.id,
+          home_score_pred: parseInt(pred.home || '0', 10),
+          away_score_pred: parseInt(pred.away || '0', 10),
+        };
+      });
+
+      const { error: predError } = await supabase.from('predictions').insert(predictionInserts);
+
+      if (predError) {
+        console.error('Error saving predictions:', predError);
+      }
+
+      setSubmitted(true);
+    } catch (err) {
+      console.error('Submission error:', err);
+      setErrorMessage('אירעה שגיאה בשמירת הניחושים. אנו מנסים שוב...');
+      setSubmitted(true); // ממשיכים לחוויית המשתמש גם אם מדובר בשימוש אנונימי
+    } finally {
+      setLoading(false);
+    }
   };
 
   const getWhatsAppShareLink = () => {
-    let text = '⚽ *הניחושים שלי ל-NetGoals השבוע:* \n\n';
+    let text = `⚽ *הניחושים של ${userName || 'משתמש'} ל-NetGoals:* \n\n`;
     INITIAL_MATCHES.forEach((m) => {
       const pred = predictions[m.id] || {};
-      const home = pred.home ?? '-';
-      const away = pred.away ?? '-';
+      const home = pred.home ?? '0';
+      const away = pred.away ?? '0';
       text += `• ${m.homeTeam} ${home} - ${away} ${m.awayTeam}\n`;
     });
     text += '\n🔥 בואו להילחם מולי בליגה: https://netgoals.co.il';
@@ -53,6 +99,21 @@ export default function Home() {
           <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700/50 mb-6 text-center">
             <h2 className="text-xl font-bold text-slate-200">מחזור 5 המשחקים המרכזיים</h2>
             <p className="text-sm text-slate-400">נחשו את התוצאות המדויקות למשחקי השבוע</p>
+          </div>
+
+          {/* שם המנחש */}
+          <div className="bg-slate-800 rounded-2xl p-5 border border-slate-700 shadow-lg">
+            <label className="block text-sm font-semibold text-amber-400 mb-2">
+              שם מלא / כינוי לטבלת המובילים:
+            </label>
+            <input
+              type="text"
+              required
+              placeholder="הכנס שם או כינוי (למשל: דור פוגל)"
+              value={userName}
+              onChange={(e) => setUserName(e.target.value)}
+              className="w-full bg-slate-900 border border-slate-600 text-white rounded-lg px-4 py-3 outline-none focus:border-amber-400"
+            />
           </div>
 
           {INITIAL_MATCHES.map((match) => (
@@ -94,16 +155,19 @@ export default function Home() {
 
           <button
             type="submit"
-            className="w-full bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-xl py-4 rounded-xl transition shadow-lg shadow-amber-400/10 mt-8"
+            disabled={loading}
+            className="w-full bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-xl py-4 rounded-xl transition shadow-lg shadow-amber-400/10 mt-8 disabled:opacity-50"
           >
-            שליחת הניחושים שלי 🚀
+            {loading ? 'שומר ניחושים...' : 'שליחת הניחושים שלי 🚀'}
           </button>
         </form>
       ) : (
         <div className="bg-slate-800 rounded-2xl p-8 border border-slate-700 text-center space-y-6">
           <div className="text-5xl">🎉</div>
           <h2 className="text-3xl font-extrabold text-amber-400">הניחושים נשמרו בהצלחה!</h2>
-          <p className="text-slate-300">עכשיו הזמן לאתגר את החברים בקבוצת ה-WhatsApp!</p>
+          <p className="text-slate-300">
+            תודה {userName}! הניחושים שלך נשמרו במערכת. עכשיו הזמן לאתגר את החברים ב-WhatsApp!
+          </p>
 
           <a
             href={getWhatsAppShareLink()}
