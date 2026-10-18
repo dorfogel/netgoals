@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import Link from 'next/link';
 import { supabase } from './lib/supabase';
 
 const INITIAL_MATCHES = [
@@ -15,7 +16,6 @@ export default function Home() {
   const [predictions, setPredictions] = useState({});
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState('');
 
   const handleScoreChange = (matchId, team, value) => {
     setPredictions((prev) => ({
@@ -30,24 +30,17 @@ export default function Home() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-    setErrorMessage('');
 
     try {
-      // 1. יצירת/עדכון פרופיל זמני למשתמש לפי השם שהזין
       const tempUserId = crypto.randomUUID();
-      
-      const { error: profileError } = await supabase.from('profiles').insert([
+
+      await supabase.from('profiles').insert([
         {
           id: tempUserId,
           full_name: userName,
         },
       ]);
 
-      if (profileError) {
-        console.error('Error saving profile:', profileError);
-      }
-
-      // 2. הכנת הניחושים להכנסה ל-Database
       const predictionInserts = INITIAL_MATCHES.map((match) => {
         const pred = predictions[match.id] || { home: '0', away: '0' };
         return {
@@ -58,17 +51,12 @@ export default function Home() {
         };
       });
 
-      const { error: predError } = await supabase.from('predictions').insert(predictionInserts);
-
-      if (predError) {
-        console.error('Error saving predictions:', predError);
-      }
+      await supabase.from('predictions').insert(predictionInserts);
 
       setSubmitted(true);
     } catch (err) {
       console.error('Submission error:', err);
-      setErrorMessage('אירעה שגיאה בשמירת הניחושים. אנו מנסים שוב...');
-      setSubmitted(true); // ממשיכים לחוויית המשתמש גם אם מדובר בשימוש אנונימי
+      setSubmitted(true);
     } finally {
       setLoading(false);
     }
@@ -92,6 +80,15 @@ export default function Home() {
       <header className="text-center mb-8 border-b border-slate-800 pb-6">
         <h1 className="text-4xl font-extrabold text-amber-400 mb-2">netgoals.co.il</h1>
         <p className="text-slate-400 text-lg">גולים ברשת • מערכת הניחושים הקהילתית</p>
+        
+        <div className="mt-6">
+          <Link
+            href="/leaderboard"
+            className="inline-flex items-center gap-2 bg-amber-400/10 hover:bg-amber-400/20 text-amber-400 border border-amber-400/30 px-5 py-2.5 rounded-xl font-bold transition text-sm"
+          >
+            🏆 לצפייה בטבלת המובילים הכללית
+          </Link>
+        </div>
       </header>
 
       {!submitted ? (
@@ -101,7 +98,6 @@ export default function Home() {
             <p className="text-sm text-slate-400">נחשו את התוצאות המדויקות למשחקי השבוע</p>
           </div>
 
-          {/* שם המנחש */}
           <div className="bg-slate-800 rounded-2xl p-5 border border-slate-700 shadow-lg">
             <label className="block text-sm font-semibold text-amber-400 mb-2">
               שם מלא / כינוי לטבלת המובילים:
@@ -178,12 +174,12 @@ export default function Home() {
             שתף את הניחושים ב-WhatsApp 📲
           </a>
 
-          <button
-            onClick={() => setSubmitted(false)}
-            className="block text-sm text-slate-400 hover:text-white mx-auto underline mt-4"
+          <Link
+            href="/leaderboard"
+            className="inline-block w-full bg-slate-700 hover:bg-slate-600 text-white font-bold text-lg py-3 rounded-xl transition mt-2"
           >
-            עריכת הניחושים
-          </button>
+            🏆 מעבר לטבלת המובילים
+          </Link>
         </div>
       )}
     </main>
