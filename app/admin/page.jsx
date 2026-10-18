@@ -3,15 +3,6 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '../lib/supabase';
 
-const MATCHES_LIST = [
-  { id: '11111111-1111-1111-1111-111111111111', homeTeam: 'מכבי חיפה', awayTeam: 'מכבי תל אביב', league: 'ליגת העל' },
-  { id: '22222222-2222-2222-2222-222222222222', homeTeam: 'בית"ר ירושלים', awayTeam: 'הפועל באר שבע', league: 'ליגת העל' },
-  { id: '33333333-3333-3333-3333-333333333333', homeTeam: 'ברצלונה', awayTeam: 'ריאל מדריד', league: 'לה ליגה' },
-  { id: '44444444-4444-4444-4444-444444444444', homeTeam: 'ארסנל', awayTeam: 'מנצ\'סטר סיטי', league: 'פרמייר ליג' },
-  { id: '55555555-5555-5555-5555-555555555555', homeTeam: 'באיירן מינכן', awayTeam: 'בורוסיה דורטמונד', league: 'בונדסליגה' },
-];
-
-// הסיסמה שמוגדרת כברירת מחדל (אפשר לשנות/להגדיר גם ב-Vercel)
 const ADMIN_PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || 'netgoals2026';
 
 export default function AdminPanel() {
@@ -19,16 +10,21 @@ export default function AdminPanel() {
   const [passwordInput, setPasswordInput] = useState('');
   const [loginError, setLoginError] = useState('');
 
+  const [matches, setMatches] = useState([]);
   const [actualScores, setActualScores] = useState({});
   const [loading, setLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
 
+  // שדות להוספת משחק חדש
+  const [newHomeTeam, setNewHomeTeam] = useState('');
+  const [newAwayTeam, setNewAwayTeam] = useState('');
+  const [newLeague, setNewLeague] = useState('ליגת העל');
+
   useEffect(() => {
-    // בדיקה אם האדמין כבר מחובר ב-session
     const savedAuth = sessionStorage.getItem('netgoals_admin_auth');
     if (savedAuth === 'true') {
       setIsAuthenticated(true);
-      loadExistingScores();
+      fetchMatches();
     }
   }, []);
 
@@ -38,22 +34,88 @@ export default function AdminPanel() {
       sessionStorage.setItem('netgoals_admin_auth', 'true');
       setIsAuthenticated(true);
       setLoginError('');
-      loadExistingScores();
+      fetchMatches();
     } else {
       setLoginError('סיסמה שגויה. נסה שוב.');
     }
   };
 
-  const loadExistingScores = async () => {
-    const { data: matches } = await supabase.from('matches').select('*');
-    if (matches && matches.length > 0) {
+  // 1. שליפת כל המשחקים מ-Supabase
+  const fetchMatches = async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('matches')
+        .select('*')
+        .order('created_at', { ascending: true });
+
+      if (error) throw error;
+
+      setMatches(data || []);
+
       const scores = {};
-      matches.forEach((m) => {
+      (data || []).forEach((m) => {
         if (m.home_score !== null && m.home_score !== undefined && m.away_score !== null && m.away_score !== undefined) {
           scores[m.id] = { home: m.home_score, away: m.away_score };
         }
       });
       setActualScores(scores);
+    } catch (err) {
+      console.error('Error fetching matches:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 2. הוספת משחק חדש
+  const handleAddMatch = async (e) => {
+    e.preventDefault();
+    if (!newHomeTeam.trim() || !newAwayTeam.trim()) return;
+
+    setLoading(true);
+    setStatusMessage('');
+
+    try {
+      const newMatchId = crypto.randomUUID();
+      const { error } = await supabase.from('matches').insert([
+        {
+          id: newMatchId,
+          home_team: newHomeTeam.trim(),
+          away_team: newAwayTeam.trim(),
+          league_name: newLeague.trim(),
+          match_time: new Date().toISOString(),
+          status: 'scheduled',
+        },
+      ]);
+
+      if (error) throw error;
+
+      setNewHomeTeam('');
+      setNewAwayTeam('');
+      setStatusMessage('✅ המשחק נוסף בהצלחה למחזור!');
+      await fetchMatches();
+    } catch (err) {
+      console.error('Error adding match:', err);
+      setStatusMessage('❌ שגיאה בהוספת המשחק.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 3. מחיקת משחק
+  const handleDeleteMatch = async (matchId) => {
+    if (!confirm('האם למחוק את המשחק ואת כל הניחושים הקשורים אליו?')) return;
+
+    setLoading(true);
+    try {
+      await supabase.from('predictions').delete().eq('match_id', matchId);
+      await supabase.from('matches').delete().eq('id', matchId);
+      setStatusMessage('🗑️ המשחק נמחק בהצלחה.');
+      await fetchMatches();
+    } catch (err) {
+      console.error('Error deleting match:', err);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -67,6 +129,7 @@ export default function AdminPanel() {
     }));
   };
 
+  // 4. שמירת תוצאות וחישוב נקודות
   const handleSaveAllAndCalculate = async () => {
     setLoading(true);
     setStatusMessage('');
@@ -78,9 +141,9 @@ export default function AdminPanel() {
 
       if (predErr) throw predErr;
 
-      let updatedMatchesCount = 0;
+      let updatedCount = 0;
 
-      for (const match of MATCHES_LIST) {
+      for (const match of matches) {
         const scoreData = actualScores[match.id];
         if (!scoreData || scoreData.home === '' || scoreData.away === '' || scoreData.home === undefined || scoreData.away === undefined) {
           continue;
@@ -91,18 +154,12 @@ export default function AdminPanel() {
 
         await supabase
           .from('matches')
-          .upsert([
-            {
-              id: match.id,
-              home_team: match.homeTeam,
-              away_team: match.awayTeam,
-              league_name: match.league,
-              home_score: homeActual,
-              away_score: awayActual,
-              match_time: new Date().toISOString(),
-              status: 'finished',
-            },
-          ]);
+          .update({
+            home_score: homeActual,
+            away_score: awayActual,
+            status: 'finished',
+          })
+          .eq('id', match.id);
 
         const matchPredictions = (predictions || []).filter((p) => p.match_id === match.id);
 
@@ -129,19 +186,19 @@ export default function AdminPanel() {
             .eq('id', pred.id);
         }
 
-        updatedMatchesCount++;
+        updatedCount++;
       }
 
-      setStatusMessage(`✅ עדכון הושלם בהצלחה עבור ${updatedMatchesCount} משחקים! הניקוד בטבלה עודכן.`);
+      setStatusMessage(`✅ עדכון התוצאות והנקודות הושלם עבור ${updatedCount} משחקים!`);
+      await fetchMatches();
     } catch (err) {
       console.error('Error calculating scores:', err);
-      setStatusMessage('❌ אירעה שגיאה בעדכון התוצאות.');
+      setStatusMessage('❌ אירעה שגיאה בחישוב התוצאות.');
     } finally {
       setLoading(false);
     }
   };
 
-  // מסך התחברות במידה והאדמין אינו מחובר
   if (!isAuthenticated) {
     return (
       <main className="max-w-md mx-auto px-4 py-16">
@@ -159,9 +216,7 @@ export default function AdminPanel() {
               onChange={(e) => setPasswordInput(e.target.value)}
               className="w-full bg-slate-900 border border-slate-600 text-white text-center rounded-xl px-4 py-3 outline-none focus:border-amber-400"
             />
-
             {loginError && <p className="text-rose-400 text-sm font-semibold">{loginError}</p>}
-
             <button
               type="submit"
               className="w-full bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold py-3.5 rounded-xl transition shadow-lg"
@@ -180,7 +235,6 @@ export default function AdminPanel() {
     );
   }
 
-  // הפאנל המלא לאחר התחברות
   return (
     <main className="max-w-2xl mx-auto px-4 py-8">
       <header className="text-center mb-8 border-b border-slate-800 pb-6">
@@ -200,7 +254,7 @@ export default function AdminPanel() {
         </div>
 
         <h1 className="text-4xl font-extrabold text-amber-400 mb-2">netgoals Admin</h1>
-        <p className="text-slate-400 text-lg">ניהול תוצאות משחקים וחישוב נקודות ⚙️</p>
+        <p className="text-slate-400 text-lg">ניהול מחזורים, משחקים ותוצאות ⚙️</p>
 
         <div className="flex justify-center gap-4 mt-6">
           <Link
@@ -224,53 +278,129 @@ export default function AdminPanel() {
         </div>
       )}
 
-      <div className="space-y-6">
-        {MATCHES_LIST.map((match) => {
-          const score = actualScores[match.id] || { home: '', away: '' };
+      {/* Form: Add New Match */}
+      <section className="bg-slate-800 rounded-2xl p-6 border border-slate-700 shadow-xl mb-8">
+        <h2 className="text-xl font-bold text-amber-400 mb-4 flex items-center gap-2">
+          ➕ הוספת משחק חדש למחזור
+        </h2>
 
-          return (
-            <div key={match.id} className="bg-slate-800 rounded-2xl p-5 border border-slate-700 shadow-lg">
-              <div className="text-xs font-semibold text-amber-400 mb-3">{match.league}</div>
-
-              <div className="grid grid-cols-7 items-center gap-2 text-center">
-                <span className="col-span-2 font-bold text-lg text-slate-100">{match.homeTeam}</span>
-
-                <input
-                  type="number"
-                  min="0"
-                  max="9"
-                  placeholder="-"
-                  value={score.home ?? ''}
-                  className="col-span-1 bg-slate-900 border border-slate-600 text-white text-center text-xl rounded-lg py-2 focus:border-amber-400 outline-none"
-                  onChange={(e) => handleScoreInput(match.id, 'home', e.target.value)}
-                />
-
-                <span className="col-span-1 text-slate-500 font-bold">:</span>
-
-                <input
-                  type="number"
-                  min="0"
-                  max="9"
-                  placeholder="-"
-                  value={score.away ?? ''}
-                  className="col-span-1 bg-slate-900 border border-slate-600 text-white text-center text-xl rounded-lg py-2 focus:border-amber-400 outline-none"
-                  onChange={(e) => handleScoreInput(match.id, 'away', e.target.value)}
-                />
-
-                <span className="col-span-2 font-bold text-lg text-slate-100">{match.awayTeam}</span>
-              </div>
+        <form onSubmit={handleAddMatch} className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1 font-semibold">קבוצת בית:</label>
+              <input
+                type="text"
+                required
+                placeholder="למשל: מכבי נתניה"
+                value={newHomeTeam}
+                onChange={(e) => setNewHomeTeam(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-600 text-white rounded-lg px-3 py-2 text-sm outline-none focus:border-amber-400"
+              />
             </div>
-          );
-        })}
+            <div>
+              <label className="block text-xs text-slate-400 mb-1 font-semibold">קבוצת חוץ:</label>
+              <input
+                type="text"
+                required
+                placeholder="למשל: הפועל תל אביב"
+                value={newAwayTeam}
+                onChange={(e) => setNewAwayTeam(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-600 text-white rounded-lg px-3 py-2 text-sm outline-none focus:border-amber-400"
+              />
+            </div>
+          </div>
 
-        <button
-          onClick={handleSaveAllAndCalculate}
-          disabled={loading}
-          className="w-full bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-xl py-4 rounded-xl transition shadow-lg mt-8 disabled:opacity-50"
-        >
-          {loading ? 'מחשב נקודות לכל המשחקים...' : 'שמור וחשב את כל התוצאות ⚡'}
-        </button>
-      </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1 font-semibold">שם הליגה / במסגרת:</label>
+            <input
+              type="text"
+              required
+              placeholder="למשל: ליגת העל / צ'מפיונס ליג"
+              value={newLeague}
+              onChange={(e) => setNewLeague(e.target.value)}
+              className="w-full bg-slate-900 border border-slate-600 text-white rounded-lg px-3 py-2 text-sm outline-none focus:border-amber-400"
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold py-3 rounded-xl transition shadow-md disabled:opacity-50"
+          >
+            {loading ? 'מוסיף משחק...' : 'הוסף משחק למערכת 🚀'}
+          </button>
+        </form>
+      </section>
+
+      {/* List & Score Management */}
+      <section className="space-y-6">
+        <h2 className="text-xl font-bold text-slate-200 border-b border-slate-700 pb-2">
+          ⚽ משחקי המחזור הנוכחי ({matches.length})
+        </h2>
+
+        {matches.length === 0 ? (
+          <div className="bg-slate-800 rounded-2xl p-8 border border-slate-700 text-center text-slate-400">
+            אין משחקים פעילים במחזור. השתמש בטופס למעלה כדי להוסיף משחקים!
+          </div>
+        ) : (
+          matches.map((match) => {
+            const score = actualScores[match.id] || { home: '', away: '' };
+
+            return (
+              <div key={match.id} className="bg-slate-800 rounded-2xl p-5 border border-slate-700 shadow-lg relative">
+                <div className="flex justify-between items-center text-xs font-semibold text-amber-400 mb-3">
+                  <span>{match.league_name}</span>
+                  <button
+                    onClick={() => handleDeleteMatch(match.id)}
+                    className="text-slate-500 hover:text-rose-400 transition"
+                    title="מחק משחק"
+                  >
+                    🗑️ מחק
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-7 items-center gap-2 text-center">
+                  <span className="col-span-2 font-bold text-lg text-slate-100">{match.home_team}</span>
+
+                  <input
+                    type="number"
+                    min="0"
+                    max="9"
+                    placeholder="-"
+                    value={score.home ?? ''}
+                    className="col-span-1 bg-slate-900 border border-slate-600 text-white text-center text-xl rounded-lg py-2 focus:border-amber-400 outline-none"
+                    onChange={(e) => handleScoreInput(match.id, 'home', e.target.value)}
+                  />
+
+                  <span className="col-span-1 text-slate-500 font-bold">:</span>
+
+                  <input
+                    type="number"
+                    min="0"
+                    max="9"
+                    placeholder="-"
+                    value={score.away ?? ''}
+                    className="col-span-1 bg-slate-900 border border-slate-600 text-white text-center text-xl rounded-lg py-2 focus:border-amber-400 outline-none"
+                    onChange={(e) => handleScoreInput(match.id, 'away', e.target.value)}
+                  />
+
+                  <span className="col-span-2 font-bold text-lg text-slate-100">{match.away_team}</span>
+                </div>
+              </div>
+            );
+          })
+        )}
+
+        {matches.length > 0 && (
+          <button
+            onClick={handleSaveAllAndCalculate}
+            disabled={loading}
+            className="w-full bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-xl py-4 rounded-xl transition shadow-lg mt-8 disabled:opacity-50"
+          >
+            {loading ? 'מחשב נקודות...' : 'שמור תוצאות וחשב נקודות ⚡'}
+          </button>
+        )}
+      </section>
     </main>
   );
 }
